@@ -24,7 +24,9 @@ What comes with every run, for the work to use:
 - `run.audit("<record>.<action>", resource=(type, ids))`: an audit record for what the work did to
   records, with this job as the actor; ids only, never values (audit.py). For payments and PHI a
   record that can't be published raises: the item isn't done.
-- Calls to other services through httpx or requests carry the run's trace (telemetry.py).
+- `run.call("<component>", "POST", "/v1/...", json=..., idempotency_key=<item id>)`: another
+  component's API, as this job's own identity (services.py). Only components in JOB_SERVICES; never
+  their databases; on a dry run only GET goes out. Calls carry the run's trace (telemetry.py).
 
 The example keeps the job's own run history to `JOB_KEEP_RUNS_DAYS` days: real work, and nothing
 outside this component.
