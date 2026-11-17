@@ -139,7 +139,7 @@ def execute(
             "valxel.job finished: %d items in %.1fs",
             items,
             time.monotonic() - began,
-            extra={"fields": {**fields, "outcome": "succeeded", "items": items}},
+            extra={"fields": {**fields, "outcome": "dry_run" if dry_run else "succeeded", "items": items}},
         )
         return 0
     finally:
