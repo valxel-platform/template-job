@@ -16,3 +16,20 @@ class Settings(BaseSettings):
     database_url: str = ""
     keep_runs_days: int = 90  # the example work: how long run records are kept
     log_level: str = "INFO"
+    # The product's data class (general | payments | phi): audit records must reach Kafka over TLS,
+    # and a run whose record can't be published fails, for payments and PHI.
+    data_class: str = "general"
+    product: str = ""  # the product's id, e.g. emr: in audit records
+    # Audit trail (audit.py): "kafka" in deployed environments, "log" locally.
+    audit_sink: str = "log"
+    audit_kafka_bootstrap: str = ""
+    audit_topic: str = "audit.v1"
+    audit_kafka_config: dict[str, str] = {}  # extra librdkafka settings: security.protocol, sasl.*
+    audit_required: bool | None = None  # default: required for payments and PHI
+    # Feature flags (flags.py): the product's Flipt over OFREP. Unset: every flag reads its default.
+    flags_url: str = ""
+    flags_environment: str = ""  # Flipt environment, e.g. production (header x-flipt-environment)
+    flags_namespace: str = ""  # the product's Flipt namespace, e.g. emr
+    flags_token: str = ""
+    flags_timeout_s: float = 0.25
+    flags_cache_s: float = 30.0

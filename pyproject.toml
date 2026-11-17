@@ -4,7 +4,16 @@ version = "0.1.0"
 description = "Valxel job template: a scheduled job that runs once and exits, with a run lock, run history, catch-up after missed runs and a time limit."
 requires-python = ">=3.12"
 dependencies = [
+  "confluent-kafka>=2.16,<3",
+  "httpx>=0.28,<1",
+  "openfeature-sdk>=0.10,<1",
+  "openfeature-provider-ofrep>=0.3,<1",
+  "opentelemetry-sdk>=1.45,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
+  "opentelemetry-instrumentation-httpx>=0.66b2",
+  "opentelemetry-instrumentation-psycopg>=0.66b2",
   "psycopg[binary]>=3.2,<4",
+  "sentry-sdk>=2.72,<3",
   "pydantic-settings>=2.16,<3",
   "pyyaml>=6.0,<7",
   "tzdata>=2025.2",
