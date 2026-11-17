@@ -143,7 +143,7 @@ def test_the_command_line(monkeypatch, tmp_path, capsys):
     assert m.main(["--from", "2026-11-02T00:00:00Z"]) == 2
     assert m.main(["--dry-run"]) == 0
     line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert line["service.name"] == "r" and line["outcome"] == "succeeded" and line["dry_run"] is True
+    assert line["service.name"] == "r" and line["outcome"] == "dry_run" and line["dry_run"] is True
     assert m.main(["--from", "2026-11-01T00:00:00Z", "--to", "2026-11-02T00:00:00Z"]) == 0
     (tmp_path / "job.yaml").write_text("name: r\n")
     assert m.main([]) == 2
