@@ -33,3 +33,11 @@ class Settings(BaseSettings):
     flags_token: str = ""
     flags_timeout_s: float = 0.25
     flags_cache_s: float = 30.0
+    # Other components the work calls (services.py), by name -> base URL, e.g.
+    # {"emr-api": "http://emr-api.emr.svc.cluster.local:8080"}. Nothing else is reachable through it.
+    services: dict[str, str] = {}
+    # The job's own identity for those calls: an OAuth client of the product's IdP. The secret is a
+    # mounted file, never an environment variable.
+    oidc_token_url: str = ""
+    client_id: str = ""
+    client_secret_file: str = "/var/run/secrets/valxel/job-client-secret"  # noqa: S105 - a path, not a secret

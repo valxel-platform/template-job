@@ -34,6 +34,17 @@ class Run:
     stop_requested: bool = False
     auditor: Auditor = field(default_factory=lambda: Auditor(LogSink(), service="job", required=False))
 
+    services: Any = None  # services.Services, made on first use
+
+    def call(self, service: str, method: str, path: str, **kw: Any) -> Any:
+        """Call another component's API as this job (services.py). On a dry run only GET goes out;
+        anything else raises services.DryRun, which the work should treat as done."""
+        if self.services is None:
+            from .services import Services
+
+            self.services = Services(self.settings)
+        return self.services.call(service, method, path, dry_run=self.dry_run, **kw)
+
     def item(self) -> AbstractContextManager[None]:
         """One unit of work: wrap each so its flags and events count in the release's cohorts."""
         return cohorts.item()
