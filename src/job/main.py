@@ -24,7 +24,11 @@ import time
 from datetime import datetime, timedelta
 from types import FrameType
 
-from . import logs, work
+from opentelemetry.trace import Status, StatusCode
+
+from . import cohorts, errors, events, flags, logs, telemetry, work
+from .audit import Auditor, make_sink
+from .component import COMPONENT
 from .config import ConfigError, JobConfig, for_environment, load
 from .context import Run, Stopped
 from .runs import LastRun, MemoryRunLog, PostgresRunLog, RunLog, now
@@ -61,6 +65,28 @@ def _runlog(settings: Settings) -> RunLog:
     return MemoryRunLog()
 
 
+def _auditor(settings: Settings) -> Auditor:
+    """The audit trail: required (a run that can't publish a record fails) for payments and PHI."""
+    required = settings.audit_required
+    if required is None:
+        required = settings.data_class in ("payments", "phi")
+    sink = make_sink(
+        settings.audit_sink,
+        bootstrap=settings.audit_kafka_bootstrap,
+        topic=settings.audit_topic,
+        config=dict(settings.audit_kafka_config),
+        data_class=settings.data_class,
+    )
+    return Auditor(
+        sink,
+        service=COMPONENT,
+        product=settings.product,
+        environment=settings.environment,
+        data_class=settings.data_class,
+        required=required,
+    )
+
+
 def execute(
     cfg: JobConfig,
     settings: Settings,
@@ -68,6 +94,7 @@ def execute(
     *,
     dry_run: bool = False,
     window: tuple[datetime, datetime] | None = None,
+    auditor: Auditor | None = None,
 ) -> int:
     """One run; returns the process exit code."""
     lock = runlog.lock(cfg.name)
@@ -102,6 +129,7 @@ def execute(
             deadline=time.monotonic() + max(limit - MARGIN_S, limit // 2),
             dry_run=dry_run,
             manual=window is not None,
+            auditor=auditor or _auditor(settings),
         )
 
         def stop(_sig: int, _frame: FrameType | None) -> None:
@@ -110,38 +138,52 @@ def execute(
         previous = signal.signal(signal.SIGTERM, stop)
         run_id = runlog.start(cfg.name, start, end, manual=run.manual)
         began = time.monotonic()
-        fields = {
+        fields: dict[str, str | bool] = {
             "job": cfg.name,
             "window_start": start.isoformat(),
             "window_end": end.isoformat(),
             "dry_run": dry_run,
             "manual": run.manual,
         }
-        try:
-            items = work.run(run)
-        except Stopped as exc:
-            runlog.finish(run_id, "stopped", error=str(exc))
-            log.warning(
-                "valxel.job stopped: %s; the next run covers this window again",
-                exc,
-                extra={"fields": {**fields, "outcome": "stopped"}},
+        # The run is one trace: its log lines carry the trace id, and calls it makes carry the trace.
+        with telemetry.tracer().start_as_current_span(
+            "job.run", attributes={f"job.{k}": v for k, v in fields.items()}
+        ) as span:
+            try:
+                items = work.run(run)
+            except Stopped as exc:
+                runlog.finish(run_id, "stopped", error=str(exc))
+                span.set_attribute("job.outcome", "stopped")
+                log.warning(
+                    "valxel.job stopped: %s; the next run covers this window again",
+                    exc,
+                    extra={"fields": {**fields, "outcome": "stopped"}},
+                )
+                return 0
+            except Exception as exc:
+                runlog.finish(run_id, "failed", error=f"{type(exc).__name__}: {exc}")
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+                span.set_attribute("job.outcome", "failed")
+                log.exception("valxel.job failed", extra={"fields": {**fields, "outcome": "failed"}})
+                return 1
+            finally:
+                signal.signal(signal.SIGTERM, previous)
+                events.report()  # the run's product events and flag cohorts, whatever its outcome
+                cohorts.report()
+            # A dry run changes nothing, so it isn't a success the next run may start from.
+            runlog.finish(
+                run_id, "stopped" if dry_run else "succeeded", items=items, error="dry run" if dry_run else ""
+            )
+            outcome = "dry_run" if dry_run else "succeeded"
+            span.set_attributes({"job.outcome": outcome, "job.items": items})
+            log.info(
+                "valxel.job finished: %d items in %.1fs",
+                items,
+                time.monotonic() - began,
+                extra={"fields": {**fields, "outcome": outcome, "items": items}},
             )
             return 0
-        except Exception as exc:
-            runlog.finish(run_id, "failed", error=f"{type(exc).__name__}: {exc}")
-            log.exception("valxel.job failed", extra={"fields": {**fields, "outcome": "failed"}})
-            return 1
-        finally:
-            signal.signal(signal.SIGTERM, previous)
-        # A dry run changes nothing, so it isn't a success the next run may start from.
-        runlog.finish(run_id, "stopped" if dry_run else "succeeded", items=items, error="dry run" if dry_run else "")
-        log.info(
-            "valxel.job finished: %d items in %.1fs",
-            items,
-            time.monotonic() - began,
-            extra={"fields": {**fields, "outcome": "dry_run" if dry_run else "succeeded", "items": items}},
-        )
-        return 0
     finally:
         lock.release()
 
@@ -169,8 +211,15 @@ def main(argv: list[str] | None = None) -> int:
         print("--from and --to go together, with --from before --to", file=sys.stderr)
         return 2
     logs.setup(cfg.name, settings.log_level)
+    telemetry.setup(cfg.name)
+    errors.start_errors()
+    flags.configure(settings)
     window = (args.start, args.end) if args.start and args.end else None
-    return execute(cfg, settings, _runlog(settings), dry_run=args.dry_run, window=window)
+    try:
+        return execute(cfg, settings, _runlog(settings), dry_run=args.dry_run, window=window)
+    finally:  # the process ends with the run: send what's queued
+        telemetry.shutdown()
+        errors.flush()
 
 
 if __name__ == "__main__":  # pragma: no cover

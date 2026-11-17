@@ -54,6 +54,23 @@ Replace `run` in `src/job/work.py`. Its contract:
 
 The example work keeps the job's own run history to `JOB_KEEP_RUNS_DAYS` days.
 
+## What comes with every run
+
+Every run comes with the same security, observability, audit trail and business metrics as the
+platform's other templates (agentic-sdlc `config/template-contract.yaml`). Where each lives is
+listed in `.valxel/capabilities.yaml`.
+
+| Area | What the job does | Where |
+| --- | --- | --- |
+| Tracing | Each run is one OpenTelemetry trace: a `job.run` span with the job, window and outcome, and spans for the httpx, requests and Postgres calls the work makes, which carry the trace on to other services. Every log line has `trace.id`. Spans are flushed before the process exits. | `telemetry.py` |
+| Error reports | A failed run goes to Sentry or GlitchTip (`SENTRY_DSN`), tagged with the component and the trace id. Messages, variables and anything personal are scrubbed. | `errors.py` |
+| Logs and alerts | JSON lines. `valxel.job failed` and `valxel.job.missed` feed the platform's `job-failed` and `job-missed` alert rules. | `logs.py`, `main.py` |
+| Audit trail | `run.audit(action, resource=(type, ids))` publishes a `valxel.audit.v1` record to the product's audit topic, with the job as a `service` actor and ids only. For payments and PHI, a record that can't be published fails the run, and Kafka must use TLS. | `audit.py`, `context.py` |
+| Product events | `events.record("<event>")` for what a feature's goal counts. At the end of the run, one `valxel.events {...}` line, which the tool counts in staging and in production. | `events.py` |
+| Feature flags | `flags.enabled(key, user=...)` reads the feature's flag from the product's Flipt (OFREP). It is off unless set, and a slow Flipt costs an item at most 250 ms. | `flags.py` |
+| Flag cohorts | `with run.item():` around each unit of work. The flags it read and the events it recorded are counted on their side, and one `valxel.flag_cohorts` line per flag lets the tool stop a release whose items fail more with the feature on. | `cohorts.py` |
+| Security | Semgrep, gitleaks and SonarQube on every PR (`security.yml`), dependency review, the image's SBOM and Grype scan, Dependabot with a week's cooldown, base images pinned to digests (`supply-chain-pins.yml`), and a non-root image run read-only with no capabilities. | `.github/` |
+
 ## job.yaml
 
 ```yaml
@@ -85,6 +102,12 @@ and G4 checks it.
 | `JOB_DATABASE_URL` | none | The job's own Postgres: run history and the lock |
 | `JOB_KEEP_RUNS_DAYS` | `90` | The example work's retention |
 | `JOB_LOG_LEVEL` | `INFO` | |
+| `JOB_PRODUCT`, `JOB_DATA_CLASS` | none, `general` | The product's id and data class: the audit trail is required, and over TLS, for `payments` and `phi` |
+| `JOB_AUDIT_SINK` | `log` | `kafka` in environments, with `JOB_AUDIT_KAFKA_BOOTSTRAP`, `JOB_AUDIT_TOPIC` (`audit.v1`), `JOB_AUDIT_KAFKA_CONFIG` (JSON: `security.protocol`, `sasl.*`) |
+| `JOB_FLAGS_URL`, `JOB_FLAGS_NAMESPACE`, `JOB_FLAGS_ENVIRONMENT`, `JOB_FLAGS_TOKEN` | none | The product's Flipt (OFREP); unset, every flag reads its default |
+| `JOB_COHORTS_SLOW_MS` | `5000` | An item slower than this counts as slow in its flag cohort |
+| `SENTRY_DSN`, `SENTRY_RELEASE` | none | Error reports (GlitchTip takes the same DSN) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | none | Where traces go; unset, traces are made but not exported |
 
 Without `JOB_DATABASE_URL`, runs keep no history, so missed and overlapping runs can't be detected.
 That's fine for a local try, but not for an environment.
@@ -114,4 +137,5 @@ uv run pytest                                     # JOB_TEST_DATABASE_URL=postgr
 tests with Postgres; coverage must stay at 90% or more. `image` builds the image, runs it once with
 a read-only root file system and no capabilities (as the platform runs it), writes its SBOM and
 fails on high or critical vulnerabilities with a fix. `dependency-review` checks new dependencies
-on pull requests. CodeQL runs from GitHub's default setup.
+on pull requests. `supply-chain-pins` keeps base images pinned to their digests, weekly and on
+Dependabot's pull requests. CodeQL runs from GitHub's default setup.

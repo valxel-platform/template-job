@@ -26,6 +26,11 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "service.name": self.service,
         }
+        from .telemetry import trace_ids
+
+        trace_id, span_id = trace_ids()
+        if trace_id:
+            out["trace.id"], out["span.id"] = trace_id, span_id
         fields = getattr(record, "fields", None)
         if isinstance(fields, dict):
             out.update({k: v for k, v in fields.items() if k not in out})
