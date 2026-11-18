@@ -1,0 +1,15 @@
+# The template conformance suite (.github/scripts/conformance.py, managed by the platform): the built
+# image does what every job repo must. One real run against its own database: it purges old run
+# records, audits it, and exits.
+image: "ci"  # the tag CI builds
+command: "uv run job-run"  # conformance.py local: the job as a process
+once: true
+postgres: "postgres:17-alpine"
+env:
+  JOB_ENVIRONMENT: ci
+  JOB_DATABASE_URL: "{postgres}"
+  JOB_FLAGS_URL: "{ofrep}"
+  JOB_PRODUCT: conformance
+  JOB_AUDIT_SINK: log
+# No product event or flag yet: the example work records and reads none (a job adds its own).
+checks: [audit, tracing]
