@@ -117,3 +117,25 @@ def test_sentry_starts_with_a_dsn_and_tags_the_component():
     errors.flush()
     sentry_sdk.init()  # off again
     telemetry.shutdown()
+
+
+def test_the_example_feature_is_behind_its_flag(caplog):
+    """The pattern every feature follows: its new behaviour reads its flag, and off is today's."""
+    import logging
+
+    from openfeature.provider.in_memory_provider import InMemoryFlag, InMemoryProvider
+
+    from job import flags
+    from job.work import example_flag
+
+    assert example_flag("emr") == "emr.example.purge-oldest" and example_flag("") == "example.example.purge-oldest"
+    caplog.set_level(logging.INFO)
+    auditor = Auditor(MemorySink(), service="reminders", product="emr")
+    m.execute(CFG, Settings(product="emr"), MemoryRunLog(), auditor=auditor)
+    assert "the oldest kept starts after" not in caplog.text
+    flags.use_provider(InMemoryProvider({"emr.example.purge-oldest": InMemoryFlag("on", {"on": True, "off": False})}))
+    try:
+        m.execute(CFG, Settings(product="emr"), MemoryRunLog(), auditor=auditor)
+        assert "the oldest kept starts after" in caplog.text
+    finally:
+        flags.use_provider(InMemoryProvider({}))
