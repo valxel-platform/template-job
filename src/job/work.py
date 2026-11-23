@@ -36,7 +36,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from . import flags
 from .context import Run
+
+
+def example_flag(product: str) -> str:
+    """The example feature's flag. It shows the pattern every feature follows: the tool gives the
+    feature a flag in the product's Flipt (on in dev and staging, off in production until it's
+    released) and the new behaviour reads it. Replace it with your first feature's own."""
+    return f"{product or 'example'}.example.purge-oldest"
 
 
 def run(run: Run) -> int:
@@ -47,5 +55,8 @@ def run(run: Run) -> int:
         return 0
     with run.item():
         removed = run.runlog.purge(run.job, before)
+        # The template's example feature, behind its flag (split by job): off, the run is today's.
+        if flags.enabled(example_flag(run.settings.product), user=run.job):
+            run.log.info("removed %d run records; the oldest kept starts after %s", removed, before.isoformat())
     run.audit("job_runs.purge", resource=("job_runs", []), details={"removed": removed, "before": before.isoformat()})
     return removed

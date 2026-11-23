@@ -11,5 +11,6 @@ env:
   JOB_FLAGS_URL: "{ofrep}"
   JOB_PRODUCT: conformance
   JOB_AUDIT_SINK: log
-# No product event or flag yet: the example work records and reads none (a job adds its own).
-checks: [audit, tracing]
+# The example work reads its feature's flag (work.example_flag) through OFREP. No product event yet:
+# it records none (a job adds its own).
+checks: [audit, tracing, flags]
